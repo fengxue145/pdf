@@ -199,30 +199,11 @@ class PDF extends \setasign\Fpdi\Tfpdf\Fpdi
         $styl += [
             'width'       => 0,
             'height'      => 0,
-            'line-height' => 2,
-            'line-offset' => '0',
+            'line-indent' => '0',
             'text-align'  => 'left',
             'padding'     => $this->cMargin
         ];
-        // 文本行高
-        $lh = $styl['line-height'];
-        // 文本对齐方式
-        $align = strtoupper(substr($styl['text-align'], 0, 1));
-        // 是否填充单元格
-        $fill = isset($styl['background-color']);
-        // 行偏移
-        $offset = array_map('intval', explode(' ', $styl['line-offset']));
-        // 是否换行
-        $break = isset($styl['word-break']) && in_array($styl['word-break'], ['break-word', 'break-all']);
-        // 内边距
-        $base_padding = $this->cMargin;
-        $padding = $this->cMargin = $styl['padding'] * 1;
-        // 字符串过滤
-        $txt = str_replace("\r", '', (string)$txt);
-        // 字符串分割
-        $lines = $break ? explode("\n", $txt) : [str_replace("\n", '', $txt)];
-        // 总行数
-        $n = 0;
+
         // 基准 x/y
         $bx = $this->x;
         $by = $this->y;
@@ -230,125 +211,159 @@ class PDF extends \setasign\Fpdi\Tfpdf\Fpdi
         $w = $styl['width'];
         // 单元格高度
         $h = $styl['height'];
-        if ($w <= 0) {
-            $w = $break ? $this->w - $this->rMargin - $this->x : $this->GetStringWidth($txt);
-        }
-        // 存储需要绘制的文本信息
+        // 文本行高
+        $lh = $styl['line-height'] ?: ceil($this->FontSize);
+        // 文本对齐方式
+        $align = strtoupper(substr($styl['text-align'], 0, 1));
+        // 行缩进
+        $indents = array_map('intval', explode(' ', $styl['line-indent']));
+        // 内边距
+        $padding = $this->cMargin = $styl['padding'] * 1;
+        // 是否填充单元格
+        $fill = isset($styl['background-color']);
+        // 是否换行
+        $break = isset($styl['word-break']) && in_array($styl['word-break'], ['break-word', 'break-all']);
+        // 字符串过滤
+        $txt = str_replace("\r", '', (string)$txt);
+        // 字符串分割
+        $lines = $break ? explode("\n", $txt) : [str_replace("\n", '', $txt)];
+        // 总行数
+        $n = 0;
+        // 基础行宽（去除padding）
+        $line_w = 0;
+        // 单元格左右内边距
+        $padding2 = 2 * $padding;
+        // 存储需要绘制的文本
         $draws = [];
 
         while(!empty($lines))
         {
-            // 文本 x/y
-            $text_x = $bx;
-            $text_y = $by;
-
             $line = array_shift($lines);
             if ($break)
             {
-                // 每一行的 X 方向偏移
-                $offsetX = (isset($offset[$n]) ? $offset[$n] : end($offset));
-                // 当前行宽度
-                $cur_w = $w - 2 * $padding - $offsetX;
-                // 当前行文本的字符长度
-                $cur_l = $this->unifontSubset ? mb_strlen($line, 'UTF-8') : strlen($line);
-                // 当前行文本的实际绘制 X/Y 坐标
-                $text_x = $bx + $offsetX;
-                $text_y = $by + $n * $lh;
+                if ($w == 0) {
+                    $w = $this->w - $this->rMargin - $this->x;
+                    $line_w = $w - $padding2;
+                }
 
+                // 行文本的绘制起点
+                $text_x = $bx + $padding;
+                $text_y = $by + $padding + $lh * $n;
+                // 行文本的字符长度
+                $line_len = $this->unifontSubset ? mb_strlen($line, 'UTF-8') : strlen($line);
+                // 行缩进
+                $line_indent = abs(isset($indents[$n]) ? $indents[$n] : end($indents));
+                // 行文本
                 $str = '';
+                // 行文本宽度
+                $str_width = $line_w;
+                // 行文本实际宽度
+                $str_w = $line_w - ($align !== 'C' ? $line_indent : 0);
+
+
                 if ($line !== '')
                 {
                     // 每行以第一个字符的宽度为基准
-                    $first_char_w = $this->GetStringWidth($this->_substr($line, 0, 1));
-                    // 最小宽度为第一个字符串的宽度
-                    if ($cur_w < $first_char_w) {
-                        $cur_w = $first_char_w;
+                    $first_cw = $this->GetStringWidth($this->_substr($line, 0, 1));
+                    $first_cw_redundancy = $first_cw / 5;
+                    if ($str_w < $first_cw) {
+                        $str_w = $first_cw; // 最小宽度为第一个字符串的宽度
                     }
-                    // 起始下标
-                    $start = 0;
                     // 预估当前行的文本长度
-                    $end = ceil($cur_w / $first_char_w);
+                    $end = ceil($str_w / $first_cw);
                     // 空格位置
                     $sep = -1;
                     // 当前文本是否超长
                     $long = false;
 
-                    while ($start < $cur_l)
-                    {
-                        $str = $this->_substr($line, $start, $end);
+                    do {
+                        $str = $this->_substr($line, 0, $end);
                         $str_width = $this->GetStringWidth($str);
-
-                        if ($str_width > $cur_w)
+                        if ($str_width - $first_cw_redundancy > $str_w)
                         {
-                            // 最少一个字符
+                            // 最低一个字符
                             if ($end === 1) break;
                             // 字符串过长，需要裁切
                             if ($styl['word-break'] === 'break-all' || !$sep)
                             {
+                                // 任意字符都可以切断
                                 $end--;
                             }
                             else
                             {
+                                // 只有空格可以切断
                                 $sep = strrpos($str, ' ');
                                 $end = $sep ? $sep : $end-1;
                             }
                             $long = true;
                         }
-                        else if (!$long && $str_width < $cur_w && $start + $end < $cur_l)
+                        else if (!$long && $str_width < $str_w && $end < $line_len)
                         {
+                            // 字符太短，添加字符
                             $end++;
                         }
                         else
                         {
                             break;
                         }
-                    }
+                    } while(1);
 
                     // 超出的部分文本，转为下一行
-                    if ($end < $cur_l)
+                    if ($end < $line_len)
                     {
                         array_unshift($lines, $this->_substr($line, $end));
                     }
+
+                    switch($align)
+                    {
+                        case 'C':
+                            $text_x = $bx + $padding + ($str_w - $str_width) / 2;
+                            break;
+                        case 'R':
+                            $text_x = $bx + $padding + ($str_w - $str_width);
+                            break;
+                        default:
+                            $text_x = $bx + $padding + $line_indent;
+                    }
                 }
 
-                // 存储要绘制的文本及位置
                 $draws[] = [
                     'x'     => $text_x,
                     'y'     => $text_y,
+                    'w'     => $str_w,
                     'value' => $str,
                 ];
             }
             else
             {
-                $this->Cell($w, $h ?: $this->FontSize + 2 * $padding, $line, $border, $lh, $align, $fill, $link);
-            }
+                if ($w <= 0) $w = $this->GetStringWidth($line) + $padding2;
+                if ($h <= 0) $h = $this->FontSize + $padding2;
 
+                $this->Cell($w, $h, $line, $border, $lh, $align, $fill, $link);
+            }
             $n++;
         }
 
         if (!empty($draws))
         {
             // 绘制背景及边框
-            $mo = min($offset);
-            $rect_x = $bx + $mo - $padding;
-            $rect_y = $by - $lh - 0.5;
-            $rect_w = $w - $mo;
-            $rect_h = $h <= 0 ? $lh * $n + 2 * $padding : $h;
-            $this->SetXY($rect_x, $rect_y);
+            $rect_w = $w;
+            $rect_h = $h <= 0 ? $lh * $n + $padding2 : $h;
             $this->Cell($rect_w, $rect_h, '', $border, 0, '', $fill, $link);
             if ($link) {
-                $this->Link($rect_x, $rect_y, $rect_w, $rect_h, $link);
+                $this->Link($bx, $by, $rect_w, $rect_h, $link);
             }
 
             // 绘制文本
+            $this->cMargin = 0;
             foreach ($draws as $item)
             {
-                $this->Text($item['x'], $item['y'], $item['value']);
+                $this->SetXY($item['x'], $item['y']);
+                $this->Cell($item['w'], $lh, $item['value']);
             }
+            $this->cMargin = $padding;
         }
 
-        // 还原默认边距
-        $this->cMargin = $base_padding;
         return $n;
     }
 
@@ -450,10 +465,8 @@ class PDF extends \setasign\Fpdi\Tfpdf\Fpdi
                     {
                         // Sets the current writing style
                         $styl = $point['styl'] + [
-                            // 'width'       => 0,
-                            // 'height'      => 0,
-                            // 'line-height' => 0,
-                            // 'text-align'  => 'L',
+                            'width'       => 0,
+                            'height'      => 0,
                         ] + ($flush_styl ? $inherit_styl : []);
                         $this->_styl($styl);
 
@@ -494,26 +507,6 @@ class PDF extends \setasign\Fpdi\Tfpdf\Fpdi
                                 break;
                             default: // text
                                 $this->WriteCell($point['value'], $border, $link, $styl);
-
-                                if ($styl['width'] > 0)
-                                {
-
-
-                                    // if ($styl['height'] > 0 && isset($styl['word-break']) && $styl['word-break'] === 'break-word')
-                                    // {
-                                    //     // $this->MultiCell($styl['width'], $styl['height'], $point['value'], $border, $styl['text-align'], $fill);
-                                    //     $this->WriteCell($styl['width'], $styl['height'], $point['value'], $border, $styl['text-align'], $fill);
-                                    // }
-                                    // else
-                                    // {
-                                    //     $this->Cell($styl['width'], $styl['height'], $point['value'], $border, $styl['line-height'], $styl['text-align'], $fill, $link);
-                                    // }
-                                }
-                                else
-                                {
-                                    // $this->Write($styl['line-height'], $point['value'], $link);
-                                }
-
                         }
 
 
