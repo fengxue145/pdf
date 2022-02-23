@@ -1,1 +1,12 @@
+# dir
+.idea
+.svn
+.vscode
+.devcontainer
 vendor
+demo
+
+# file
+.gitattributes
+composer*.php
+composer.lock
