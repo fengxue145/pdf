@@ -2,19 +2,17 @@
     "name": "fengxue145/pdf",
     "description": "This is a simple EXAMPLE of PDF editing.",
     "type": "library",
-    "keywords": ["pdf"],
+    "keywords": ["pdf", "fpdi", "tfpdf"],
     "require": {
-        "mpdf/mpdf": "7.1.9"
+        "setasign/fpdi": "^2.3",
+        "setasign/tfpdf": "1.32.*"
     },
     "minimum-stability": "stable",
     "license": "LGPL-2.1",
     "autoload": {
         "psr-4": {
             "fengxue145\\pdf\\": "src/"
-        },
-        "files": [
-            "src/helpers.php"
-        ]
+        }
     },
     "authors": [
         {

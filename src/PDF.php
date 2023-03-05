@@ -2,345 +2,437 @@
 
 namespace fengxue145\pdf;
 
-class PDF
+class PDF extends \setasign\Fpdi\Tfpdf\Fpdi
 {
-    protected $mpdf;
-    protected static $inline_tags = ['SPAN', 'A', 'SUB', 'SUP', 'ACRONYM', 'BIG', 'SMALL', 'INS', 'S', 'STRIKE', 'DEL', 'STRONG', 'CITE', 'Q', 'EM', 'B', 'I', 'U', 'SAMP', 'CODE', 'KBD', 'TT', 'VAR', 'FONT', 'TIME', 'MARK', 'IMG'];
-    protected static $position_keys = ['LEFT', 'RIGHT', 'TOP', 'BOTTOM'];
-
-    public function __construct(array $config = array())
+    static public function DefaultStyle()
     {
-        $this->mpdf = new \Mpdf\Mpdf($config);
-        $reflect = new \ReflectionObject($this->mpdf);
-        $reflectProperty = $reflect->getProperty('tag');
-        $reflectProperty->setAccessible(true);
+        return array(
+            'body' => [
+                'font-family' => 'helvetica',
+                'font-style' => '',
+                'font-size' => 12,
+                'color' => '#000',
+                'text-align' => 'left',
+            ],
+            'text' => [
+                'padding'        => 0.6,
+                'border-width'   => 0,
+                'text-indent'    => 0,
+                'autosize'       => 0,
+                'min-font-size'  => 5,
+                'word-break'     => 'none', // 可选：break-word | break-all
+                'text-align'     => 'left', // 可选：left | center | right
+                'vertical-align' => 'top', // 可选：top | middle | bottom
+            ]
+        );
+    }
 
-        $tag = $reflectProperty->getValue($this->mpdf);
-        $properties = [
-            'mpdf' => null,
-            'cache' => null,
-            'cssManager' => null,
-            'form' => null,
-            'otl' => null,
-            'tableOfContents' => null,
-            'sizeConverter' => null,
-            'colorConverter' => null,
-            'imageProcessor' => null,
-            'languageToFont' => null,
+    /**
+     * Sets the coordinate points to draw
+     *
+     * @param array $point   Draws information about an object.
+     * @param int   $startX  X offset.
+     * @param int   $startY  Y offset.
+     * @return array [$x1, $y1, $x2, $y2]
+     */
+    protected function _position(&$point, $startX = 0, $startY = 0)
+    {
+        if (isset($point['x'])) {
+            if (!is_array($point['x']))
+                $point['x'] = array($point['x']);
+            array_walk($point['x'], function (&$v, $_, $d) {
+                $v += $d;
+            }, $startX);
+        } else $point['x'] = [$this->x];
+
+        if (isset($point['y'])) {
+            if (!is_array($point['y']))
+                $point['y'] = array($point['y']);
+            array_walk($point['y'], function (&$v, $_, $d) {
+                $v += $d;
+            }, $startY);
+        } else $point['y'] = [$this->y];
+
+
+        $point['x'][] = $this->x;
+        $point['y'][] = $this->y;
+        list($x1, $x2) = $point['x'];
+        list($y1, $y2) = $point['y'];
+        $this->SetXY($x1, $y1);
+        return [$x1, $y1, $x2, $y2];
+    }
+
+    /**
+     * Draws cells, supporting row offsets
+     *
+     * @see Cell()
+     * @see MultiCell()
+     */
+    public function WriteCell($txt, $link = '', $css = array())
+    {
+        $cMargin = $this->cMargin;
+        $this->cMargin = 0;
+
+        // 默认样式
+        $css += [
+            'width' => 0,
+            'height' => 0,
+            'line-height' => $this->FontSize
         ];
-        foreach ($properties as $name => &$value) {
-            $value = get_object_property($tag, $name);
-        }
 
-        // Replace the default tag handling class
-        //  - Allows new/replacement tag classes
-        $reflectProperty->setValue($this->mpdf, new Tag($properties));
+        // 基准 x/y
+        $x = $this->x;
+        $y = $this->y;
+        // 单元格宽度
+        $w = $css['width'];
+        // 单元格高度
+        $h = $css['height'];
+        // 行高
+        $lh = $css['line-height'];
+        // 文本水平对齐方式
+        $align = strtoupper(substr($css['text-align'], 0, 1));
+        // 文本垂直对齐方式
+        $valign = strtoupper(substr($css['vertical-align'], 0, 1));
+        // 首行缩进
+        $indent = $css['text-indent'];
+        // 内边距
+        $tp = $css['padding-top'];
+        $rp = $css['padding-right'];
+        $bp = $css['padding-bottom'];
+        $lp = $css['padding-left'];
+        // 是否换行
+        $break = in_array($css['word-break'], ['break-word', 'break-all']);
+        // 字符串过滤
+        $txt = str_replace("\r", '', (string)$txt);
+        // 字符串分割
+        $lines = $break ? explode("\n", $txt) : [str_replace("\n", '', $txt)];
+        // 每次缩减字体大小的值
+        $step = 0.2;
+        // 当前字体大小
+        $fs = $css['font-size'];
+        // 自适应后的最小字体
+        $mfs = max($css['min-font-size'], 2);
+        // 内容自适应
+        $autosize = $css['autosize'] == 1;
+        // 存储需要绘制的文本
+        $draws = [];
+        // 盒子对象
+        $box = [
+            'w'  => 0, // 盒子的宽度
+            'h'  => 0, // 盒子的高度
+            'ow' => 0, // 内容的宽度
+            'oh' => 0, // 内容的高度
+        ];
 
-        // Add custom tag
-        $this->RegisterTag('<include>', 'include_');
-        $this->RegisterTag('<template>', 'template');
-    }
 
-    public function RegisterTag($tag, $className)
-    {
-        Tag::setTagClassName(trim($tag, '<>'), $className);
+        if ($break) {
+            while (1) {
+                $draws = [];
+                $clone_lines = $lines;
 
-        if (strpos($this->mpdf->enabledtags, $tag) === false) {
-            $this->mpdf->enabledtags .= $tag;
-        }
-    }
+                while (($line = array_shift($clone_lines)) !== null) {
+                    if ($w > 0 && $line !== '') {
+                        // 行文本的字符长度
+                        $line_len = mb_strlen($line, 'UTF-8');
+                        // 每行以第一个字符的宽度为基准
+                        $first_cw = max(1, $this->GetStringWidth(mb_substr($line, 0, 1, 'UTF-8')));
+                        $first_cw_redundancy = $first_cw / 5;
+                        // 最小宽度为第一个字符串的宽度
+                        if ($w < $first_cw) {
+                            $w = $first_cw;
+                        }
+                        // 如果定义了text-indent，则最小宽度为第一个字符的宽度+text-indent
+                        if ($align === 'L' && $w < $indent) {
+                            $w = $first_cw + $indent;
+                        }
+                        // 预估当前行的文本长度
+                        $end = intval(ceil($w / $first_cw));
+                        // 空格位置
+                        $sep = -1;
+                        // 当前文本是否超长
+                        $long = false;
 
-    public function SetMeta(array $meta)
-    {
-        $meta += ['title' => '', 'author' => '', 'subject' => '', 'keywords' => '', 'creator' => ''];
-        $this->SetTitle($meta['title']);
-        $this->SetAuthor($meta['author']);
-        $this->SetSubject($meta['subject']);
-        $this->SetKeywords($meta['keywords']);
-        $this->SetCreator($meta['creator']);
-    }
+                        do {
+                            $str = mb_substr($line, 0, $end, 'UTF-8');
+                            // 首行缩进的时候，增加缩进长度
+                            $str_width = $this->GetStringWidth($str) + (empty($draws) && $align === 'L' ? $indent : 0);
+                            if ($str_width - $first_cw_redundancy > $w) {
+                                // 最低一个字符
+                                if ($end === 1) break;
+                                // 字符串过长，需要裁切
+                                if ($css['word-break'] === 'break-all' || !$sep) {
+                                    // 任意字符都可以切断
+                                    $end--;
+                                } else {
+                                    // 只有空格可以切断
+                                    $sep = mb_strrpos($str, ' ', 0, 'UTF-8');
+                                    $end = $sep ? min($sep, $end - 1) : $end - 1;
+                                }
+                                $long = true;
+                            } else if (!$long && $str_width < $w && $end < $line_len) {
+                                // 字符太短，添加字符
+                                $end++;
+                            } else {
+                                break;
+                            }
+                        } while (1);
 
-    public function SetStyleFile(string $file)
-    {
-        $this->mpdf->WriteHTML('<link rel="stylesheet" type="text/css" href="' . $file . '">', \Mpdf\HTMLParserMode::HEADER_CSS);
-    }
-
-    public function SetStyle($style)
-    {
-        if (is_string($style)) {
-            $this->mpdf->WriteHTML($style, \Mpdf\HTMLParserMode::HEADER_CSS);
-        } else if (is_array($style)) {
-            $str = '';
-            foreach ($style as $k => $v) {
-                $str .= sprintf("%s{ %s }\n", $k, style2str($v));
-            }
-            $this->mpdf->WriteHTML($str, \Mpdf\HTMLParserMode::HEADER_CSS);
-        }
-    }
-
-    public function SetFonts(array $fonts)
-    {
-        foreach ($fonts as $dir => $fs) {
-            $this->mpdf->AddFontDirectory($dir);
-            $this->mpdf->fontdata = array_merge($this->mpdf->fontdata, $fs);
-            foreach ($fs as $family => $config) {
-                if (isset($config['R']) && $config['R']) {
-                    $this->mpdf->AddFont($family, 'R');
-                }
-                if (isset($config['B']) && $config['B']) {
-                    $this->mpdf->AddFont($family, 'B');
-                }
-                if (isset($config['I']) && $config['I']) {
-                    $this->mpdf->AddFont($family, 'I');
-                }
-                if (isset($config['BI']) && $config['BI']) {
-                    $this->mpdf->AddFont($family, 'BI');
-                }
-            }
-        }
-    }
-
-    public function WriteMap(Map $map)
-    {
-        // Set document metad information
-        $this->mpdf->SetTitle($map->title);
-        $this->mpdf->SetAuthor($map->author);
-        $this->mpdf->SetSubject($map->subject);
-        $this->mpdf->SetKeywords($map->keywords);
-        $this->mpdf->SetCreator($map->creator);
-
-        // Fonts that can be used by setting documents
-        if (!empty($map->fonts)) {
-            $this->SetFonts($map->fonts);
-        }
-
-        // Set the default style (1)
-        if (!empty($map->default_style_file)) {
-            $this->SetStyleFile($map->default_style_file);
-        }
-
-        // Set the default style (2)
-        if (!empty($map->default_style)) {
-            $this->SetStyle($map->default_style);
-        }
-
-        foreach ($map->__toArray() as $page) {
-            // Set Template
-            if (isset($page['template'])) {
-                list('sourcefile' => $sourcefile, 'pageno' => $pageno) = $page['template'] + ['sourcefile' => null, 'pageno' => 0];
-                if ($sourcefile && is_file($sourcefile)) {
-                    $pagecount = $this->mpdf->SetSourceFile($sourcefile);
-                    $pageno = max(1, min(intval($pageno) ?: $pagecount, $pagecount));
-                    $tplIdx = $this->mpdf->ImportPage($pageno);
-                    list('w' => $w, 'h' => $h) = $this->mpdf->GetTemplateSize($tplIdx);
-                    if (!isset($page['newformat']) && !isset($page['sheet-size'])) {
-                        $page['sheet-size'] = array(min($w, $h), max($w, $h));
+                        // 超出的部分文本，转为下一行
+                        if ($end < $line_len) {
+                            array_unshift($clone_lines, mb_substr($line, $end, null, 'UTF-8'));
+                        }
+                        $draws[] = ['w' => $str_width, 'txt' => $str];
+                    } else {
+                        $_w = $line === '' ? 0 : $this->GetStringWidth($line);
+                        if (empty($draws) && $align === 'L') {
+                            $_w += $indent;
+                        }
+                        $draws[] = ['w' => $_w, 'txt' => $line];
                     }
-                    if (!isset($page['orientation'])) {
-                        $page['orientation'] = $w > $h ? 'L' : 'P';
-                    }
-                    $this->mpdf->SetPageTemplate($tplIdx);
                 }
+
+                // 需要自适应大小
+                if (!$autosize || $fs <= $mfs || $h <= 0 || count($draws) * $this->FontSize <= $h) {
+                    break;
+                }
+                $fs = max($mfs, $fs - $step);
+                $this->SetFontSize($fs);
             }
 
-            // Add Page
-            $this->mpdf->AddPageByArray($page);
+            // 如果未定义宽度，则使用最长行的宽度
+            if ($w <= 0) {
+                $w = max(array_column($draws, 'w'));
+            }
+            // 计算每一行所占用的高度
+            if ($autosize && $h > 0) {
+                $lh = count($draws) * $lh > $h ? $h / count($draws) : $lh;
+            }
+            // 重置每行的宽度和高度
+            foreach ($draws as &$v) {
+                $v['w'] = $w;
+                $v['h'] = $lh;
+            }
+            // 如果未定义宽度，则计算所有行高度的总和
+            $oh = array_sum(array_column($draws, 'h'));
+            if ($h <= 0) {
+                $h = $oh;
+            }
 
-            // Draw content
-            if (isset($page['body'])) {
-                $body = $page['body'];
-                if (is_array($body)) {
-                    $body = $this->Mapping2HTML($body);
+            $box['w'] = $box['ow'] = $w;
+            $box['h'] = $h;
+            $box['oh'] = $oh;
+        }
+        // no line break
+        else {
+            $line = current($lines);
+
+            // 如果高度是0，则高度是line-height
+            if ($h <= 0) $h = $lh;
+
+            // 自适应大小需要定义宽度
+            if ($autosize && $w > 0) {
+                while (1) {
+                    $sw = $this->GetStringWidth($line);
+                    if ($fs <= $mfs || ($sw < $w && $this->FontSize < $h)) {
+                        break;
+                    }
+                    $fs = max($mfs, $fs - $step);
+                    $this->SetFontSize($fs);
                 }
-                $this->mpdf->WriteHTML($body, \Mpdf\HTMLParserMode::HTML_BODY);
+                $box['ow'] = $sw;
+            }
+            // 非自适应且未定义宽度时，使用字符串的长度
+            else if ($w <= 0) {
+                $box['ow'] = $w = $this->GetStringWidth($line);
+            } else {
+                $box['ow'] = $this->GetStringWidth($line);
+            }
+
+            $box['w'] = $w;
+            $box['h'] = $h;
+            $box['oh'] = $this->FontSize;
+            $draws[] = ['w' => max($box['w'], $box['ow']), 'h' => $box['oh'], 'txt' => $line];
+        }
+
+        // 1. 确定整体大小
+        $x      = $this->x;
+        $y      = $this->y;
+        $bw     = isset($css['border-width']) ? $css['border-width'] : 0;
+        $rect_w = $box['w'] + $lp + $rp + $bw * 2;
+        $rect_h = $box['h'] + $tp + $bp + $bw * 2;
+
+        // 2. 绘制背景及边框
+        $this->Cell($rect_w, $rect_h, '', $bw > 0, 0, '', isset($css['background-color']));
+        if ($link) {
+            $this->Link($x, $y, $rect_w, $rect_h, $link);
+        }
+
+        // 3. 绘制内容
+        $by = $y + $tp + $bw;
+        if ($box['h'] > $box['oh']) {
+            if ($valign === 'M') {
+                $by += ($box['h'] - $box['oh']) / 2;
+            } else if ($valign === 'B') {
+                $by += $box['h'] - $box['oh'];
             }
         }
+        foreach ($draws as $k => $item) {
+            $bx = $x + $lp + $bw;
+            // 4. 第一行在居左的情况下，允许 text-indent
+            if ($k === 0) {
+                if ($align === 'L') {
+                    $bx += $indent;
+                }
+            }
+
+            $this->SetXY($bx, $by);
+            $this->Cell($item['w'], $item['h'], $item['txt'], 0, 0, $item['w'] > $box['w'] ? 'L' : $align);
+            $by += $item['h'];
+        }
+
+
+        $this->cMargin = $cMargin;
     }
 
-    public function Mapping2HTML(array $mapping, array $pos = array())
+    /**
+     * Draw the mapping
+     */
+    public function WriteMapping(&$mapping)
     {
-        $html = '';
-        foreach ($mapping as $item) {
-            $item     += ['tag' => 'div', 'attrs' => [], 'children' => [], 'text' => ''];
-            $tag      = strtoupper($item['tag']);
-            $attrs    = [];
-            $children = [];
-            $prev_pos = $pos;
+        // Setting default Properties
+        $mapping += [
+            'path'     => '',
+            'title'    => '-',
+            'author'   => '-',
+            'subject'  => '-',
+            'keywords' => '-',
+            'creator'  => date('Y/m/d H:i:s'),
+            'fonts'    => [],
+            'pages'    => [],
+        ];
 
-            // Elements that are not displayed are ignored
-            if (isset($item['hidden']) && $item['hidden'] == true) {
+
+        // Load Template
+        $templatePages = 0;
+        if (isset($mapping['name'])) {
+            $template_file = rtrim($mapping['path'], '\\/') . DIRECTORY_SEPARATOR . $mapping['name'];
+            if (file_exists($template_file)) {
+                $templatePages = $this->setSourceFile($template_file);
+            }
+        }
+
+
+        // Load the font you want to use
+        foreach ($mapping['fonts'] as $family => $item) {
+            $uni = $family[0] !== '@';
+            foreach ($item as $style => $file) {
+                $this->AddFont(ltrim($family, '@'), $style, $file, $uni);
+            }
+        }
+
+
+        // Set Meta Info
+        $this->SetTitle($mapping['title'], true);
+        $this->SetAuthor($mapping['author'], true);
+        $this->SetSubject($mapping['subject'], true);
+        $this->SetKeywords($mapping['keywords'], true);
+        $this->SetCreator($mapping['creator'], true);
+
+
+        // Set Margin Info
+        if (isset($mapping['margin'])) {
+            $margin = [
+                'top'    => $this->tMargin,
+                'right'  => $this->rMargin,
+                'bottom' => $this->bMargin,
+                'left'   => $this->lMargin,
+            ];
+            if (is_numeric($mapping['margin'])) {
+                array_walk($margin, function (&$v, $_, $m) {
+                    $v = $m;
+                }, (float)$mapping['margin']);
+            } else if (is_array($mapping['margin'])) {
+                $margin = array_merge($margin, $mapping['margin']);
+            }
+
+            $this->SetMargins($margin['left'], $margin['top'], $margin['right']);
+            $this->SetAutoPageBreak(true, $margin['bottom']);
+        }
+
+
+        // Set Default Style
+        $cssManager = new CssManager($this);
+        $cssManager->ReadCss(self::DefaultStyle());
+        if (isset($mapping['style'])) {
+            $cssManager->ReadCss($mapping['style']);
+        }
+
+        $count = $mapping['pages'] ? max(array_keys($mapping['pages'])) : 0;
+        $count = max($count, $templatePages);
+        for ($i = 1; $i <= $count; $i++) {
+            // Load and edit the template
+            $this->AddPage();
+            if ($templatePages > 0 && $i <= $templatePages) {
+                $pageId = $this->importPage($i);
+                $this->useImportedPage($pageId, 0, 0, null, null, true);
+            }
+
+            if (!isset($mapping['pages'][$i])) {
                 continue;
             }
 
-            /* --------------- ATTR PRE-PROCESSING --------------- */
-            foreach ($item['attrs'] as $k => $v) {
-                if (is_array($v)) {
-                    $v = $k === 'style' ? style2str($v) : implode(' ', $v);
-                } else if (!is_scalar($v) || (is_bool($v) && $v == false)) {
+            // Write custom content
+            $page = &$mapping['pages'][$i];
+            $page += ['startX' => 0, 'startY' => 0, 'content' => []];
+            $content = &$mapping['pages'][$i]['content'];
+            foreach ($content as $node) {
+                if (!isset($node['value'])) {
                     continue;
                 }
-                $k = strtoupper($k);
-                if ($k === 'ID' || $k === 'CLASS' || preg_match('/^(HEADER|FOOTER)-STYLE/i', $k)) {
-                    $v = trim(strtoupper($v));
-                }
-                $attrs[$k] = $v;
-            }
-            /* --------------- END ATTR PRE-PROCESSING --------------- */
 
-            switch ($tag) {
-                case 'CHECKBOX':
-                    $tag = 'DIV';
-                    $item += ['options' => [], 'value' => []];
-                    if (!empty($item['options'])) {
-                        $value = (array)$item['value'];
-                        foreach ($item['options'] as $ck => $cv) {
-                            if (in_array($ck, $value) || (isset($cv['checked']) && $cv['checked'] == true)) {
-                                $children[$ck] = $cv;
-                            }
+                $node += ['type' => 'text'];
+                $cssManager->LoadCss($node);
+                $css = $cssManager->PreviewCss($node);
+
+                // Set the coordinates
+                list($x, $y, $x2, $y2) = $this->_position($node, $page['startX'], $page['startY']);
+
+                switch ($node['type']) {
+                    case 'line':
+                        $this->Line($x, $y, $x2, $y2);
+                        break;
+                    case 'link':
+                        $this->Link($x, $y, $css['width'], $css['height'], $node['value']);
+                        break;
+                    case 'rect':
+                        $fill = isset($css['background-color']) ? 'F' : '';
+                        $border = isset($css['border-width']) && $css['border-width'] ? 'D' : '';
+                        $this->Rect($x, $y, $css['width'], $css['height'], $border . $fill);
+                        break;
+                    case 'checkbox':
+                        if ($node['value']) {
+                            $this->Text($x, $y, is_string($node['value']) ? $node['value'] : '√');
                         }
-                    }
-                    $item['children'] = $children;
-                    break;
-
-                case 'RADIO':
-                    $tag = 'DIV';
-                    $item += ['options' => [], 'value' => ''];
-                    if (!empty($item['options'])) {
-                        $value = $item['value'];
-                        foreach ($item['options'] as $ck => $cv) {
-                            if ($ck === $value || (isset($cv['checked']) && $cv['checked'] == true)) {
-                                $children[$ck] = $cv;
-                                break; // Radio has only one
-                            }
-                        }
-                    }
-                    $item['children'] = $children;
-                    break;
-
-                case 'SELECT':
-                    $tag = 'DIV';
-                    $item += ['options' => [], 'value' => '', 'column_key' => 'value', 'index_key' => 'key'];
-                    if (!empty($item['options'])) {
-                        $value = $item['value'];
-                        $options = array_column($item['options'], $item['column_key'], $item['index_key']);
-                        if (isset($options[$value])) {
-                            $item['text'] = (string)$options[$value];
-                        }
-                    }
-                    break;
-            }
-
-
-            $cssManager = get_object_property($this->mpdf, 'cssManager');
-            $css = $cssManager->PreviewBlockCSS($tag, $attrs);
-
-            // Elements that are not displayed are ignored
-            if (isset($css['DISPLAY']) && $css['DISPLAY'] == 'none') {
-                continue;
-            }
-
-            if (isset($css['POSITION'])) {
-                if ($css['POSITION'] === 'relative') {
-                    foreach (self::$position_keys as $k) {
-                        if (isset($css[$k])) {
-                            if (!isset($pos[$k])) {
-                                $pos[$k] = $css[$k];
-                            } else {
-                                $pos[$k] = $this->MergeSize($k, $pos[$k], $css[$k]);
-                            }
-                        }
-                    }
-                    // MPDF only supports absolute and fixed
-                    $css['POSITION'] = 'absolute';
-                    $attrs['STYLE'] .= 'position:absolute;';
-                } else if ($css['POSITION'] === 'absolute' && !empty($pos)) {
-                    foreach (self::$position_keys as $k) {
-                        if (!isset($pos[$k])) {
-                            continue;
-                        } else if (!isset($css[$k])) {
-                            $size = $pos[$k];
+                        break;
+                    case 'image':
+                        $imagesize = getimagesize($node['value']);
+                        if (!$imagesize) {
+                            trigger_error('FPDF warning: ' . $node['value'] . ' Unable to find file or not a valid image file', E_USER_WARNING);
                         } else {
-                            $size = $this->MergeSize($k, $pos[$k], $css[$k]);
+                            $link = isset($node['link']) ? $node['link'] : '';
+                            $this->Image($node['value'], $x, $y, $css['width'] ?? 0, $css['height'] ?? 0, $node['ext'] ?? image_type_to_extension($imagesize[2], false), $link);
                         }
-                        // reset position
-                        $css[$k] = $size;
-                        $attrs['STYLE'] .= sprintf('%s:%s;', strtolower($k), $size);
-                    }
+                        break;
+                    case 'plain': // plain text
+                        $this->Text($x, $y, $node['value']);
+                        break;
+                    default: // text
+                        if ($node['value'] !== '') {
+                            $link = isset($node['link']) ? $node['link'] : '';
+                            $this->WriteCell($node['value'], $link, $css);
+                        }
                 }
-
-                // not block
-                if (in_array($tag, self::$inline_tags)) {
-                    $block_css = 'width:auto;height:auto;border:none;background:none;';
-                    $block_css .= 'position:' . $css['POSITION'] . ';';
-                    if (isset($css['TOP'])) {
-                        $block_css .= 'top:' . $css['TOP'] . ';';
-                    }
-                    if (isset($css['RIGHT'])) {
-                        $block_css .= 'right:' . $css['RIGHT'] . ';';
-                    }
-                    if (isset($css['BOTTOM'])) {
-                        $block_css .= 'bottom:' . $css['BOTTOM'] . ';';
-                    }
-                    if (isset($css['LEFT'])) {
-                        $block_css .= 'left:' . $css['LEFT'] . ';';
-                    }
-                    $html .= sprintf('<DIV style="%s"><%s%s>%s</%s></DIV>', $block_css, $tag, attr2str($attrs), (string)$item['text'], $tag);
-                } else {
-                    $html .= sprintf('<%s%s>%s</%s>', $tag, attr2str($attrs), (string)$item['text'], $tag);
-                }
-            } else {
-                $html .= sprintf('<%s%s>%s</%s>', $tag, attr2str($attrs), (string)$item['text'], $tag);
-            }
-            $html .= PHP_EOL;
-
-            // Recursively process child nodes
-            if (!empty($item['children'])) {
-                $html .= $this->Mapping2HTML($item['children'], $pos);
-                $pos = $prev_pos;
             }
         }
-        return $html;
-    }
-
-    protected function MergeSize($direction, $sizeA, $sizeB)
-    {
-        $pattern = '/^(?P<size>[-0-9.,]+)?(?P<unit>[%a-z-]+)?$/';
-        $resA = preg_match($pattern, $sizeA, $partsA);
-        $resB = preg_match($pattern, $sizeB, $partsB);
-        if (!$resA || $sizeA == 'auto') {
-            return $sizeB;
-        } else if (!$resB || $sizeB == 'auto') {
-            return $sizeA;
-        } else {
-            $unitA = !empty($partsA['unit']) ? $partsA['unit'] : null;
-            $unitB = !empty($partsB['unit']) ? $partsB['unit'] : null;
-            $sizeA = !empty($partsA['size']) ? (float)$partsA['size'] : 0.0;
-            $sizeB = !empty($partsB['size']) ? (float)$partsB['size'] : 0.0;
-            if ($unitA == $unitB) {
-                return sprintf('%.2f%s', $sizeA + $sizeB, $unitA);
-            } else {
-                $sizeConverter = get_object_property($this->mpdf, 'sizeConverter');
-                $cont_w = $this->mpdf->w;
-                $cont_h = $this->mpdf->h;
-                if ($direction === 'LEFT' || $direction === 'RIGHT') {
-                    $a = $sizeConverter->convert($sizeA, $cont_w, $this->mpdf->FontSize, false);
-                    $b = $sizeConverter->convert($sizeB, $cont_w, $this->mpdf->FontSize, false);
-                } else {
-                    $a = $sizeConverter->convert($sizeA, $cont_h, $this->mpdf->FontSize, false);
-                    $b = $sizeConverter->convert($sizeB, $cont_h, $this->mpdf->FontSize, false);
-                }
-                return sprintf('%.2fmm', $a + $b);
-            }
-        }
-    }
-
-    public function __call($name, $arguments)
-    {
-        return call_user_func_array(array($this->mpdf, $name), $arguments);
-    }
-
-    public static function __callStatic($name, $arguments)
-    {
-        return call_user_func_array(array('\Mpdf\Mpdf', $name), $arguments);
     }
 }

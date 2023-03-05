@@ -1,179 +1,321 @@
 
-这是一个PHP库，基于 [mPDF](https://github.com/mpdf/mpdf) 。在其基础上稍微增加一些功能。
+这是一个PHP库，基于 [Tfpdf](https://github.com/Setasign/tFPDF) 进行开发。
 
 
 ## 安装
 ```
-$ composer require fengxue145/pdf
+$ composer require fengxue145/pdf:v1.0.1
 ```
 
 
 ## 用法
-参见 [mPDF](https://github.com/mpdf/mpdf)
+参见 [FPDF](http://fpdf.org/)
 
-
-
-## 库修改
-
-使用 `PHP::Reflection` 替换了 mPDF 库的 `\Mpdf\Tag` 类，重写了 `getTagClassName` 方法，并新增 `setTagClassName` 方法，允许加入自定义标签处理类。
-
-案例：
-``` php
-<?php
-require_once __DIR__ . '/vendor/autoload.php';
-
-class Red extends \Mpdf\Tag\InlineTag
-{
-    public function open($attr, &$ahtml, &$ihtml)
-	{
-        $attr += ['STYLE' => ''];
-        $attr['STYLE'] .= 'color:red;';
-        parent::open($attr, $ahtml, $ihtml);
-    }
-}
-
-$pdf = new \fengxue145\pdf\PDF();
-$pdf->RegisterTag('<red>', '\Red');
-$pdf->WriteHTML('<red>Hello World</red>');
-$pdf->Output();
-```
-
-
-## 新增标签
-
-### &lt;template&gt;
-
-作用：允许使用PDF模板。继承于 &lt;pagebreak&gt; 标签，在其基础上增加两个 `src` 和 `pageno` 两个属性。
-
-属性：
-- `src`: PDF模板文件路径（可选）
-- `pageno`: 使用的PDF模板文件页码（可选，默认最后一页）
-
-案例：
-``` html
-<template src="./template.pdf" pageno="1">
-    <div>Hello World</div>
-</template>
-```
-
-### &lt;include&gt;
-
-作用：引入其他html文件。
-
-属性：
-- `src`: html文件的路径
-
-案例：
-``` html
-<include src="./header.html"/>
-<div>Hello World</div>
-<include src="./footer.html"/>
-```
 
 
 ## 新增方法
 
-### RegisterTag($tag, $className)
-
-作用：注册/覆盖标签的处理类。
+### WriteCell($txt, $link = '', $css = array())
 
 参数：
-- `$tag`: string
+- `$txt`: string
 
-    标签名称。
+    单元格文本内容，支持 "\n" 换行；
 
-- `$className`: string
+- `$link`: string
 
-    标签处理类名称。如果是内部（mPDF）的标签处理类，只需要填写类名即可(不含命名空间); 若是外部的类，需填写完整的类名称（含命名空间）。
+    文本链接；
+
+- `$css`: array
+
+    单元格样式数组；
+
+
+参见 Cell()、MultiCell() 方法;
+
+
+
+### WriteMapping(&$mapping)
+
+作用：此方法只是将 Mapping 结构数据转换成常规操作并执行的方法；
+
+参数：
+
+- `$mapping`: array
+
+    Mapping 结构数组；
+
 
 案例：
 ``` php
 <?php
 require_once __DIR__ . '/vendor/autoload.php';
 
-class Red extends \Mpdf\Tag\InlineTag
-{
-    public function open($attr, &$ahtml, &$ihtml)
-	{
-        $attr += ['STYLE' => ''];
-        $attr['STYLE'] .= 'color:red;';
-        parent::open($attr, $ahtml, $ihtml);
-    }
-}
+$mapping = [
+    $mapping = [
+      // 模板名称（可选）
+      'name' => 'example.pdf',
+      // 模板路径（可选）
+      'path' => './web/public/template/',
+      // 模板所使用的字体（注：下面要使用的字体都必须在这里先定义）
+      'fonts' => [
+        // font-family => ...
+        'DejaVuSans' => [
+             // font-style => font file
+          '' => 'DejaVuSans.ttf',
+          'B' => 'DejaVuSans-Bold.ttf',
+        ],
+      ],
+      // 设置文档标题（可选）
+      'title'    => 'Derivative Knowledge Training and Questionnaire 6.2018',
+      // 设置文档作者（可选）
+      'author'   => 'Transaction Technologies',
+      // 设置文档主题（可选）
+      'subject'  => '',
+      // 设置文档关键字（可选）
+      'keywords' => '',
+      // 设置文档创建时间（可选）
+      'creator'  => '2022/02/16 09:57',
+      // 文档边距（可选）
+      'margin' => [
+        'top'    => 10,
+        'right'  => 10,
+        'bottom' => 10,
+        'left'   => 10,
+      ],
+      // 默认样式
+      'style' => [
+        'body' => [
+          'font-family'   => 'PMingLiU',
+          'font-style'    => '',
+          'font-size'     => 10,
+          'color'         => '#000000',
+        ],
+        'checkbox' => [
+          'font-family'   => 'DejaVuSans',
+          'font-style'    => 'B',
+          'font-size'     => 10,
+        ],
+        'text' => [
+          // 'border' => '0.1 solid #FF0000',
+          'autosize' => 1,
+          'min-font-size' => 4,
+        ]
+      ],
+
+      'pages' => self::pages($context)
+    ];
+];
 
 $pdf = new \fengxue145\pdf\PDF();
-$pdf->RegisterTag('<red>', '\Red');
-$pdf->WriteHTML('<red>Hello World</red>');
+$pdf->WriteMapping($mapping);
 $pdf->Output();
 ```
 
 
-### SetMeta($meta)
+## Mapping 数组结构
 
-作用：设置PDF文档元信息。
-
-参数：
-- `$meta`: array
-
-    PDF元信息数组 `title` `author` `subject` `keywords` `creator`。
-    详见 `mPDF::SetAuthor()` `mPDF::SetCreator()` `mPDF::SetKeywords()` `mPDF::SetSubject()` `mPDF::SetTitle()`
-
-
-### SetStyleFile($file)
-
-作用：添加默认样式。
-
-参数：
-- `$file`: string
-
-    CSS样式文件路径。详见 `mPDF::WriteHTML()`
-
-
-### SetStyle($style)
-
-作用：添加默认样式。
-
-参数：
-- `$style`: string|array
-
-    CSS样式。详见 `mPDF::WriteHTML()`
-
-
-### SetFonts($fonts)
-
-作用：添加字体定义
-
-参数：
-- `$fonts`: array
-
-    字体定义数组。详见 `mPDF::AddFontDirectory()` `mPDF::AddFont()`
-
-案例：
+原操作PDF的方式：
 ```php
-<?php
 require_once __DIR__ . '/vendor/autoload.php';
 
-$pdf = new \fengxue145\pdf\PDF();
-$pdf->SetFonts([
-    '/usr/local/fonts' => [
-        'frutiger' => [
-            'R' => 'Frutiger-Normal.ttf',
-            'I' => 'FrutigerObl-Normal.ttf',
-        ]
-    ]
-]);
-$pdf->WriteHTML('<span style="font-family: frutiger">Hello World</span>');
-$pdf->Output();
+$pdf = new fengxue145\pdf\PDF();
+// 使用模板
+$pdf->setSourceFile('./example/template/sample_basic.pdf');
+// 添加字体并使用字体
+$pdf->AddFont('DejaVuSans', '', 'DejaVuSans.ttf', true);
+$pdf->SetFont('DejaVuSans', '', 16);
+// 设置PDF元数据
+$pdf->SetTitle('PDF Example');
+$pdf->SetAuthor('fengxue145');
+$pdf->SetSubject('This is a simple EXAMPLE of PDF editing.');
+$pdf->SetKeywords('pdf,fpdf');
+$pdf->SetCreator('2023/01/22 15:26');
+// 添加页面
+$pdf->AddPage();
+$pageId = $pdf->importPage(1);
+$pdf->useImportedPage($pageId, 0, 0, null, null, true);
+// 写入内容
+$pdf->Text(100, 10, 'This is a line of text.');
+$pdf->Link(100, 10, 100, 20, 'http://fpdf.org/');
+$pdf->Image('./example/mapping/example.png', 10, 100, 100);
+$pdf->SetXY(100, 60);
+$pdf->Cell(100, 30, 'Hello PDF.');
+$pdf->Output(__DIR__ . '/example.pdf', 'F');
 ```
 
+将其转换为 Mapping 结构：
+```php
+require_once __DIR__ . '/vendor/autoload.php';
 
-### WriteMap($map)
+$pdf = new fengxue145\pdf\PDF();
+$mapping = [
+    // use template
+    'name' => 'sample_basic.pdf',
+    'path' => './example/template/',
 
-作用：将HTML抽象化成数组，并将其写入PDF。
+    // defined and use font
+    'fonts' => [
+        'DejaVuSans' => [
+            '' => 'DejaVuSans.ttf',
+        ],
+    ],
 
-详细用法参考：example/mapping/index.php
+    // pdf meta data
+    'title'    => 'PDF Example',
+    'author'   => 'fengxue145',
+    'subject'  => 'This is a simple EXAMPLE of PDF editing.',
+    'keywords' => 'pdf,fpdf',
+    'creator'  => '2023/01/22 15:26',
 
+    // default style
+    'style' => [
+        'body' => [
+            'font-family'   => 'DejaVuSans',
+            'font-style'    => '',
+            'font-size'     => 10,
+            'color'         => '#000000',
+        ]
+    ],
 
-### Mapping2HTML(array $mapping, $pos = array())
+    'pages' => [
+        // page no
+        1 => [
+            'content' => [
+                'any keys 1' => [
+                    'x' => 100,
+                    'y' => 10,
+                    'type' => 'plain',
+                    'value' => 'This is a line of text.',
+                ],
+                'any keys 2' => [
+                    'x' => 100,
+                    'y' => 10,
+                    'type' => 'link',
+                    'value' => 'http://fpdf.org/',
+                    'style' => [
+                        'width' => 100,
+                        'height' => 20,
+                    ]
+                ],
+                'any keys 3' => [
+                    'x' => 10,
+                    'y' => 100,
+                    'type' => 'image',
+                    'value' => './example/mapping/example.png',
+                    'style' => [
+                        'width' => 100,
+                    ]
+                ],
+                'any keys 4' => [
+                    'x' => 100,
+                    'y' => 60,
+                    'type' => 'text',
+                    'value' => 'Hello PDF.',
+                    'style' => [
+                        'width' => 100,
+                        'height' => 30
+                    ]
+                ]
+            ]
+        ]
+    ]
+];
+$pdf->WriteMapping($mapping);
+$pdf->Output(__DIR__ . '/example.pdf', 'F');
+```
 
-作用：将 mapping 结构数组转成 `HTML`。
+完整结构：
+```php
+$mapping = [
+    // 模板名称（可选）
+    'name' => 'example.pdf',
+    // 模板路径（可选）
+    'path' => './web/public/template/',
+
+    // 模板所使用的字体（注：下面要使用的字体都必须在这里先定义）
+    'fonts' => [
+        // font-family => ...
+        'DejaVuSans' => [
+            // font-style => font file
+            '' => 'DejaVuSans.ttf',
+            'B' => 'DejaVuSans-Bold.ttf',
+        ],
+        // 在 font-family 前面加上 @ 符号，表示使用内部字体
+        '@courier' => [
+            '' => 'courier'
+        ]
+    ],
+
+    // 设置文档标题（可选）
+    'title'    => 'Derivative Knowledge Training and Questionnaire 6.2018',
+    // 设置文档作者（可选）
+    'author'   => 'Transaction Technologies',
+    // 设置文档主题（可选）
+    'subject'  => '',
+    // 设置文档关键字（可选）
+    'keywords' => '',
+    // 设置文档创建时间（可选）
+    'creator'  => '2022/02/16 09:57',
+
+    // 文档边距（可选）
+    'margin' => [
+        'top'    => 10,
+        'right'  => 10,
+        'bottom' => 10,
+        'left'   => 10,
+    ],
+
+    // 默认样式（可选）
+    'style' => [
+        // 全局样式
+        'body' => [
+            'font-family'   => 'PMingLiU',
+            'font-style'    => '',
+            'font-size'     => 10,
+            'color'         => '#000000',
+        ],
+        // 类型的默认样式
+        'checkbox' => [
+            'font-family'   => 'DejaVuSans',
+            'font-style'    => 'B',
+            'font-size'     => 10,
+        ],
+        'text' => [
+            // 'border' => '0.1 solid #FF0000',
+            'autosize' => 1,
+            'min-font-size' => 4,
+        ]
+    ],
+
+    // 页面数组
+    'pages' => [
+        // 页码（需要写入数据的页码）
+        // 比如：使用模板总共有10页，只需要在第9页绘制内容，则页码设为 9 即可。
+        1 => [
+            // X坐标的偏移值（默认 0）
+            'startX' => 0,
+            // Y坐标的偏移值（默认 0）
+            'startY' => 0,
+            // 操作数组列表
+            'content' => [
+                // 键名任意（可有可无）
+                'key' => [
+                    // 写入的X坐标（自动加上 startX）
+                    'x' => 0,
+                    // 写入的Y坐标（自动加上 startY）
+                    'y' => 0,
+                    // 操作类型，支持：line、link、checkbox、image、plain、text
+                    'type' => 'text',
+                    // 写入的内容（NULL值跳过）
+                    'value' => 'hello world.',
+                    // 写入样式（不同的操作支持的样式都不一样）
+                    'style' => [
+
+                    ]
+                ]
+            ]
+        ]
+    ]
+];
+```
