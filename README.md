@@ -31,7 +31,7 @@ $ composer require fengxue145/pdf:v1.0.1
     单元格样式数组；
 
 
-参见 Cell()、MultiCell() 方法;
+参见 tFPDF::Cell()、tFPDF::MultiCell() 方法;
 
 
 
@@ -52,65 +52,39 @@ $ composer require fengxue145/pdf:v1.0.1
 require_once __DIR__ . '/vendor/autoload.php';
 
 $mapping = [
-    $mapping = [
-      // 模板名称（可选）
-      'name' => 'example.pdf',
-      // 模板路径（可选）
-      'path' => './web/public/template/',
-      // 模板所使用的字体（注：下面要使用的字体都必须在这里先定义）
-      'fonts' => [
-        // font-family => ...
-        'DejaVuSans' => [
-             // font-style => font file
-          '' => 'DejaVuSans.ttf',
-          'B' => 'DejaVuSans-Bold.ttf',
-        ],
-      ],
-      // 设置文档标题（可选）
-      'title'    => 'Derivative Knowledge Training and Questionnaire 6.2018',
-      // 设置文档作者（可选）
-      'author'   => 'Transaction Technologies',
-      // 设置文档主题（可选）
-      'subject'  => '',
-      // 设置文档关键字（可选）
-      'keywords' => '',
-      // 设置文档创建时间（可选）
-      'creator'  => '2022/02/16 09:57',
-      // 文档边距（可选）
-      'margin' => [
-        'top'    => 10,
-        'right'  => 10,
-        'bottom' => 10,
-        'left'   => 10,
-      ],
-      // 默认样式
-      'style' => [
+    'style' => [
         'body' => [
-          'font-family'   => 'PMingLiU',
-          'font-style'    => '',
-          'font-size'     => 10,
-          'color'         => '#000000',
+            'font-family'   => 'courier',
+            'font-style'    => '',
+            'font-size'     => 10,
+            'color'         => '#000000',
         ],
-        'checkbox' => [
-          'font-family'   => 'DejaVuSans',
-          'font-style'    => 'B',
-          'font-size'     => 10,
-        ],
-        'text' => [
-          // 'border' => '0.1 solid #FF0000',
-          'autosize' => 1,
-          'min-font-size' => 4,
-        ]
-      ],
+    ],
 
-      'pages' => self::pages($context)
-    ];
+    'pages' => [
+        1 => [
+            'content' => [
+                'key' => [
+                    'x' => 10,
+                    'y' => 10,
+                    'type' => 'text',
+                    'value' => 'hello word'
+                ]
+            ]
+        ]
+    ]
 ];
 
 $pdf = new \fengxue145\pdf\PDF();
 $pdf->WriteMapping($mapping);
-$pdf->Output();
+// 等同于以下操作
+// $pdf->AddPage();
+// $pdf->SetFont('courier', '', 10);
+// $pdf->SetTextColor(0, 0, 0);
+// $pdf->Text(10, 10, 'hello word.');
+$pdf->Output(__DIR__ . '/example.pdf', 'F');
 ```
+
 
 
 ## Mapping 数组结构
@@ -181,6 +155,7 @@ $mapping = [
     'pages' => [
         // page no
         1 => [
+            // action lists
             'content' => [
                 'any keys 1' => [
                     'x' => 100,
@@ -241,10 +216,8 @@ $mapping = [
             '' => 'DejaVuSans.ttf',
             'B' => 'DejaVuSans-Bold.ttf',
         ],
-        // 在 font-family 前面加上 @ 符号，表示使用内部字体
-        '@courier' => [
-            '' => 'courier'
-        ]
+        // 以下内部字体无需定义即可使用
+        // courier、helvetica、times、symbol、zapfdingbats
     ],
 
     // 设置文档标题（可选）
@@ -300,7 +273,7 @@ $mapping = [
             // 操作数组列表
             'content' => [
                 // 键名任意（可有可无）
-                'key' => [
+                'text' => [
                     // 写入的X坐标（自动加上 startX）
                     'x' => 0,
                     // 写入的Y坐标（自动加上 startY）
@@ -308,10 +281,140 @@ $mapping = [
                     // 操作类型，支持：line、link、checkbox、image、plain、text
                     'type' => 'text',
                     // 写入的内容（NULL值跳过）
-                    'value' => 'hello world.',
+                    'value' => "hello world.\nhello world.",
                     // 写入样式（不同的操作支持的样式都不一样）
                     'style' => [
-
+                        // 字体名称（参见 fonts）
+                        'font-family' => 'DejaVuSans',
+                        // 字体样式（参见 fonts）
+                        'font-style' => 'B',
+                        // 字体大小
+                        'font-size' => 16,
+                        // 字体颜色
+                        'color' => '#FF0000',
+                        // 单元格背景色
+                        'background-color' => '#FF00FF',
+                        // border 边框（颜色支持 rgb 格式）
+                        'border' => '1 solid #FF0000',
+                        'border-width' => 1,
+                        'border-color' => '#FF0000',
+                        // padding 内边距
+                        'padding' => 10,
+                        'padding-top' => 10,
+                        'padding-right' => 10,
+                        'padding-bottom' => 10,
+                        'padding-left' => 10,
+                        // 单元格宽度
+                        'width' => 100,
+                        // 单元和高度
+                        'height' => 50,
+                        // 文本行高
+                        'line-height' => 16,
+                        // 文本水平对齐，可选：left | center | right
+                        'text-align' => 'left',
+                        // 文本垂直对齐，可选：top | middle | bottom
+                        'vertical-align' => 'top',
+                        // 文本换行方式，可选：none | break-word | break-all
+                        'word-break' => 'none',
+                        // 自动缩放字体，可选： true | false
+                        'autosize' => true,
+                        // 最小字体大小（自动缩放字体不会小于该大小）
+                        'min-font-size' => 8,
+                    ]
+                ],
+                // 复选框类型，主要用于写入单个字符；
+                'checkbox' => [
+                    'x' => 0,
+                    'y' => 0,
+                    'type' => 'checkbox',
+                    // 可以是布尔值，也可以是字符串
+                    'value' => TRUE,
+                    // 支持的CSS样式如下
+                    'style' => [
+                        'font-family' => 'DejaVuSans',
+                        'font-style' => 'B',
+                        'font-size' => 16,
+                        'color' => '#FF0000',
+                    ]
+                ],
+                // 纯文本。参见 tFPDF::Text()
+                'plain' => [
+                    'x' => 0,
+                    'y' => 0,
+                    'type' => 'plain',
+                    // 纯文本字符串
+                    'value' => 'plain text',
+                    // 支持的CSS样式如下
+                    'style' => [
+                        'font-family' => 'DejaVuSans',
+                        'font-style' => 'B',
+                        'font-size' => 16,
+                        'color' => '#FF0000',
+                    ]
+                ],
+                // 线条。参见 tFPDF::Line()
+                'line' => [
+                    'x' => [10, 50],
+                    'y' => [20, 20],
+                    'type' => 'line',
+                    // 必须设置value, 除 NULL 以外都可以。
+                    'value' => TRUE,
+                    // 支持的CSS样式如下
+                    'style' => [
+                        'border' => '1 solid #FF0000',
+                        'border-width' => 1,
+                        'border-color' => '#FFF',
+                    ]
+                ],
+                // 链接。参见：tFPDF::Link()
+                'link' => [
+                    'x' => 0,
+                    'y' => 0,
+                    'type' => 'link',
+                    'value' => 'http://www.fpdf.org/',
+                    // 支持的CSS样式如下
+                    'style' => [
+                        // 链接的宽度
+                        'width' => 100,
+                        // 链接的高度
+                        'height' => 50,
+                    ]
+                ],
+                // 区块。参见：tFPDF::Rect()
+                'rect' => [
+                    'x' => 0,
+                    'y' => 0,
+                    'type' => 'rect',
+                    'value' => TRUE,
+                    // 支持的CSS样式如下
+                    'style' => [
+                        // 区块的宽度
+                        'width' => 100,
+                        // 区块的高度
+                        'height' => 50,
+                        'background-color' => '#FF00FF',
+                        'border' => '1 solid #FF0000',
+                        'border-width' => 1,
+                        'border-color' => '#FF0000',
+                    ]
+                ],
+                // 图片。参见：tFPDF::Image()
+                'image' => [
+                    'x' => 0,
+                    'y' => 0,
+                    'type' => 'image',
+                    // 图片文件路径
+                    'value' => './src/example.png',
+                    // 图片的文件类型（可选，默认自动识别）
+                    'ext' => 'png',
+                    // 点击图片后的跳转链接（可选）
+                    'link' => 'http://www.fpdf.org/',
+                    // 支持的CSS样式如下
+                    'style' => [
+                        // 图片的宽度（如果需要一边自适应的话，任填其一即可）
+                        'width' => 100,
+                        // 图片的高度（如果需要一边自适应的话，任填其一即可）
+                        'height' => 50,
                     ]
                 ]
             ]
